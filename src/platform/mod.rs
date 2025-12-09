@@ -20,6 +20,7 @@ pub fn terminate_process(pid: u32) -> Result<()> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = pid;
         anyhow::bail!("Unsupported platform")
     }
 }
@@ -36,6 +37,7 @@ pub fn kill_process(pid: u32) -> Result<()> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = pid;
         anyhow::bail!("Unsupported platform")
     }
 }
@@ -52,6 +54,7 @@ pub fn suspend_process(pid: u32) -> Result<()> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = pid;
         anyhow::bail!("Unsupported platform")
     }
 }
@@ -68,6 +71,7 @@ pub fn resume_process(pid: u32) -> Result<()> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = pid;
         anyhow::bail!("Unsupported platform")
     }
 }
@@ -84,6 +88,7 @@ pub fn is_process_running(pid: u32) -> bool {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = pid;
         false
     }
 }
@@ -100,6 +105,7 @@ pub fn set_cpu_affinity(pid: u32, cores: &[usize]) -> Result<()> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = (pid, cores);
         anyhow::bail!("Unsupported platform")
     }
 }
@@ -116,6 +122,7 @@ pub fn set_process_priority(pid: u32, priority: i8) -> Result<()> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = (pid, priority);
         anyhow::bail!("Unsupported platform")
     }
 }
