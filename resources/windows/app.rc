@@ -1,0 +1,42 @@
+// Windows Resource Script for MultiInstance
+// This file defines the application icon and version information
+
+#include <winver.h>
+
+// Application Icon
+// Icon index 1 is used by Windows Explorer
+1 ICON "app.ico"
+
+// Version Information
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS__WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"  // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "Jack Zhang"
+            VALUE "FileDescription",  "Run multiple instances of single-instance applications"
+            VALUE "FileVersion",      "1.0.0"
+            VALUE "InternalName",     "multiinstance"
+            VALUE "LegalCopyright",   "Copyright 2024 Jack Zhang. MIT License."
+            VALUE "OriginalFilename", "multiinstance.exe"
+            VALUE "ProductName",      "MultiInstance"
+            VALUE "ProductVersion",   "1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252  // US English, Windows Multilingual
+    END
+END
+
+// Application Manifest for Windows Vista+ compatibility
+// Enables visual styles and declares DPI awareness
+1 RT_MANIFEST "app.manifest"

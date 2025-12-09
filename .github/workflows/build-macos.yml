@@ -1,0 +1,249 @@
+name: Build macOS
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Install ImageMagick
+        run: brew install imagemagick
+
+      - name: Generate macOS icon
+        run: |
+          # Ensure resources/macos directory exists
+          mkdir -p "resources/macos"
+
+          if [ -f "assets/MultiInstance_Logo.svg" ]; then
+            echo "Generating icon from SVG..."
+
+            # Create iconset directory
+            ICONSET_DIR="resources/macos/AppIcon.iconset"
+            mkdir -p "$ICONSET_DIR"
+
+            # Generate all required icon sizes
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 16x16 "$ICONSET_DIR/icon_16x16.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 32x32 "$ICONSET_DIR/icon_16x16@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 32x32 "$ICONSET_DIR/icon_32x32.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 64x64 "$ICONSET_DIR/icon_32x32@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 128x128 "$ICONSET_DIR/icon_128x128.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 256x256 "$ICONSET_DIR/icon_128x128@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 256x256 "$ICONSET_DIR/icon_256x256.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 512x512 "$ICONSET_DIR/icon_256x256@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 512x512 "$ICONSET_DIR/icon_512x512.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 1024x1024 "$ICONSET_DIR/icon_512x512@2x.png"
+
+            # Convert to icns
+            iconutil -c icns "$ICONSET_DIR" -o "resources/macos/AppIcon.icns"
+            rm -rf "$ICONSET_DIR"
+
+            echo "Icon generated successfully"
+          else
+            echo "Warning: SVG not found, skipping icon generation"
+          fi
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "${{ github.ref_name }}" ]; then
+            VERSION="dev"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create app bundle
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          APP_BUNDLE="target/${{ matrix.target }}/release/MultiInstance.app"
+
+          mkdir -p "$APP_BUNDLE/Contents/MacOS"
+          mkdir -p "$APP_BUNDLE/Contents/Resources"
+
+          cp "target/${{ matrix.target }}/release/multiinstance" "$APP_BUNDLE/Contents/MacOS/"
+          cp "resources/macos/Info.plist" "$APP_BUNDLE/Contents/"
+
+          # Update version in Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+
+          if [ -f "resources/macos/AppIcon.icns" ]; then
+            cp "resources/macos/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
+          fi
+
+      - name: Sign app (ad-hoc)
+        run: codesign --force --deep --sign - "target/${{ matrix.target }}/release/MultiInstance.app"
+
+      - name: Create DMG
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          ARCH="${{ matrix.target }}"
+
+          # Simplify architecture name for filename
+          if [ "$ARCH" = "x86_64-apple-darwin" ]; then
+            ARCH_NAME="intel"
+          else
+            ARCH_NAME="apple-silicon"
+          fi
+
+          DMG_NAME="MultiInstance-$VERSION-macos-$ARCH_NAME.dmg"
+
+          hdiutil create -volname "MultiInstance" \
+            -srcfolder "target/${{ matrix.target }}/release/MultiInstance.app" \
+            -ov -format UDZO "$DMG_NAME"
+
+          echo "Created: $DMG_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiinstance-${{ matrix.target }}
+          path: MultiInstance-*.dmg
+
+  build-macos-universal:
+    runs-on: macos-latest
+    needs: build-macos
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-universal-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-universal-cargo-
+
+      - name: Install ImageMagick
+        run: brew install imagemagick
+
+      - name: Generate macOS icon
+        run: |
+          # Ensure resources/macos directory exists
+          mkdir -p "resources/macos"
+
+          if [ -f "assets/MultiInstance_Logo.svg" ]; then
+            ICONSET_DIR="resources/macos/AppIcon.iconset"
+            mkdir -p "$ICONSET_DIR"
+
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 16x16 "$ICONSET_DIR/icon_16x16.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 32x32 "$ICONSET_DIR/icon_16x16@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 32x32 "$ICONSET_DIR/icon_32x32.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 64x64 "$ICONSET_DIR/icon_32x32@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 128x128 "$ICONSET_DIR/icon_128x128.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 256x256 "$ICONSET_DIR/icon_128x128@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 256x256 "$ICONSET_DIR/icon_256x256.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 512x512 "$ICONSET_DIR/icon_256x256@2x.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 512x512 "$ICONSET_DIR/icon_512x512.png"
+            magick "assets/MultiInstance_Logo.svg" -background none -resize 1024x1024 "$ICONSET_DIR/icon_512x512@2x.png"
+
+            iconutil -c icns "$ICONSET_DIR" -o "resources/macos/AppIcon.icns"
+            rm -rf "$ICONSET_DIR"
+          fi
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "${{ github.ref_name }}" ]; then
+            VERSION="dev"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create universal binary
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create \
+            target/x86_64-apple-darwin/release/multiinstance \
+            target/aarch64-apple-darwin/release/multiinstance \
+            -output target/universal-apple-darwin/release/multiinstance
+
+          # Verify the universal binary
+          echo "Universal binary architectures:"
+          lipo -info target/universal-apple-darwin/release/multiinstance
+
+      - name: Create universal app bundle
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          APP_BUNDLE="target/universal-apple-darwin/release/MultiInstance.app"
+
+          mkdir -p "$APP_BUNDLE/Contents/MacOS"
+          mkdir -p "$APP_BUNDLE/Contents/Resources"
+
+          cp "target/universal-apple-darwin/release/multiinstance" "$APP_BUNDLE/Contents/MacOS/"
+          cp "resources/macos/Info.plist" "$APP_BUNDLE/Contents/"
+
+          # Update version in Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+
+          if [ -f "resources/macos/AppIcon.icns" ]; then
+            cp "resources/macos/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
+          fi
+
+      - name: Sign universal app (ad-hoc)
+        run: codesign --force --deep --sign - "target/universal-apple-darwin/release/MultiInstance.app"
+
+      - name: Create universal DMG
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          DMG_NAME="MultiInstance-$VERSION-macos-universal.dmg"
+
+          hdiutil create -volname "MultiInstance" \
+            -srcfolder "target/universal-apple-darwin/release/MultiInstance.app" \
+            -ov -format UDZO "$DMG_NAME"
+
+          echo "Created: $DMG_NAME"
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiinstance-macos-universal
+          path: MultiInstance-*-macos-universal.dmg

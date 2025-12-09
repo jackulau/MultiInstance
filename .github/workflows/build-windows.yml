@@ -1,0 +1,145 @@
+name: Build Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install ImageMagick
+        run: |
+          choco install imagemagick -y
+          refreshenv
+
+      - name: Generate Windows icon
+        shell: pwsh
+        run: |
+          # Find ImageMagick installation directory dynamically
+          $magickPath = Get-ChildItem "C:\Program Files\ImageMagick*" -Directory | Select-Object -First 1
+          if ($magickPath) {
+            $env:PATH = "$($magickPath.FullName);$env:PATH"
+            Write-Host "Found ImageMagick at: $($magickPath.FullName)"
+          }
+
+          # Ensure resources/windows directory exists
+          New-Item -ItemType Directory -Force -Path "resources/windows" | Out-Null
+
+          # Check if SVG exists
+          if (Test-Path "assets/MultiInstance_Logo.svg") {
+            Write-Host "Generating icon from SVG..."
+            magick convert "assets/MultiInstance_Logo.svg" `
+              -background none `
+              "(" -clone 0 -resize 16x16 ")" `
+              "(" -clone 0 -resize 32x32 ")" `
+              "(" -clone 0 -resize 48x48 ")" `
+              "(" -clone 0 -resize 64x64 ")" `
+              "(" -clone 0 -resize 128x128 ")" `
+              "(" -clone 0 -resize 256x256 ")" `
+              -delete 0 `
+              "resources/windows/app.ico"
+            Write-Host "Icon generated successfully"
+          } else {
+            Write-Host "Warning: SVG not found, creating placeholder icon"
+            # Create a simple placeholder icon
+            magick convert -size 256x256 xc:navy -fill white -gravity center -pointsize 72 -annotate 0 "MI" "resources/windows/app.ico"
+          }
+
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Get version from tag
+        id: get_version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          if ($version -match '^v(.+)$') {
+            $version = $Matches[1]
+          } else {
+            $version = "dev"
+          }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create distribution package
+        shell: pwsh
+        run: |
+          $version = "${{ steps.get_version.outputs.VERSION }}"
+          $distDir = "dist"
+
+          # Create dist directory
+          New-Item -ItemType Directory -Force -Path $distDir
+
+          # Copy files
+          Copy-Item "target/x86_64-pc-windows-msvc/release/multiinstance.exe" "$distDir/MultiInstance.exe"
+          if (Test-Path "README.md") { Copy-Item "README.md" "$distDir/" }
+          if (Test-Path "LICENSE") { Copy-Item "LICENSE" "$distDir/" }
+
+          # Create ZIP
+          $zipName = "MultiInstance-$version-windows-x64.zip"
+          Compress-Archive -Path "$distDir/*" -DestinationPath $zipName
+
+          echo "Created: $zipName"
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+
+      - name: Create installer
+        shell: pwsh
+        run: |
+          $version = "${{ steps.get_version.outputs.VERSION }}"
+
+          # Update version in ISS file
+          $issContent = Get-Content "scripts/installer.iss" -Raw
+          $issContent = $issContent -replace '#define MyAppVersion "1.0.0"', "#define MyAppVersion `"$version`""
+          $issContent | Set-Content "scripts/installer.iss"
+
+          # Build installer
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "scripts/installer.iss"
+
+          # Rename output
+          $installerName = "MultiInstance-$version-setup.exe"
+          if (Test-Path "target/x86_64-pc-windows-msvc/release/MultiInstance-$version-setup.exe") {
+            Move-Item "target/x86_64-pc-windows-msvc/release/MultiInstance-$version-setup.exe" $installerName
+          } elseif (Test-Path "target/x86_64-pc-windows-msvc/release/MultiInstance-1.0.0-setup.exe") {
+            Move-Item "target/x86_64-pc-windows-msvc/release/MultiInstance-1.0.0-setup.exe" $installerName
+          }
+
+          echo "Created: $installerName"
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiinstance-windows-x64-zip
+          path: MultiInstance-*-windows-x64.zip
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiinstance-windows-x64-setup
+          path: MultiInstance-*-setup.exe
