@@ -76,8 +76,10 @@ windows = { version = "0.58", features = [
 ]}
 winreg = "0.52"
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
 objc = "0.2"
 core-foundation = "0.10"
